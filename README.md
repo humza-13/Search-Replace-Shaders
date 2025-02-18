@@ -35,7 +35,7 @@
 
 ## Credits
 
-- **Jake Carter:**  
+- **[Jake Carter](https://jcfolio.weebly.com/):**
   The initial implementation of the "Find Materials" functionality was created by Jake Carter and is credited accordingly.
 
 - **Muhammad Humza Butt:**  
