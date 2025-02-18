@@ -23,7 +23,7 @@
 ## Getting Started
 
 1. **Installation:**  
-   Place the `SearchMaterialByShader.cs` file into an `Editor` folder within your Unity project's `Assets` directory.
+   Place the `ShaderTool.cs` file into an `Editor` folder within your Unity project's `Assets` directory.
 
 2. **Access the Tool:**  
    In the Unity Editor, navigate to **Tools > Search Material By Shader** to open the tool.
