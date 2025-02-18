@@ -57,10 +57,11 @@ public class ShaderTool : EditorWindow
     private enum Tab
     {
         Find,
-        Replace
+        Replace,
+        Errors
     }
     private Tab currentTab = Tab.Find;
-    private readonly string[] tabNames = { "Find Materials", "Replace Shaders" };
+    private readonly string[] tabNames = { "Find Materials", "Replace Shaders", "Error Shaders" };
 
     private bool guiInitialized = false;
 
@@ -164,6 +165,9 @@ public class ShaderTool : EditorWindow
             case Tab.Replace:
                 DrawShaderReplacementSection();
                 break;
+            case Tab.Errors:
+                DrawErrorShadersSection();
+                break;
         }
         EditorGUILayout.EndVertical();
 
@@ -181,24 +185,28 @@ public class ShaderTool : EditorWindow
     }
 
     /// <summary>
-    /// Draws the tab selection interface.
+    /// Draws the tab selection interface with equal-width buttons.
     /// </summary>
     private void DrawTabs()
     {
         EditorGUILayout.BeginHorizontal();
-        GUILayout.FlexibleSpace();
+        // Calculate an equal width for each tab button
+        // Subtract some margin (e.g., 20 pixels) for padding if needed
+        float buttonWidth = (position.width - 20) / tabNames.Length;
         
-        // Draw tab buttons
-        GUI.changed = false;
-        currentTab = (Tab)GUILayout.Toolbar((int)currentTab, tabNames, tabStyle, GUILayout.MinWidth(300));
-        if (GUI.changed)
+        for (int i = 0; i < tabNames.Length; i++)
         {
-            // Reset results view when switching tabs
-            showResults = false;
-            GUI.FocusControl(null);
+            // Disable the button for the currently selected tab
+            GUI.enabled = (currentTab != (Tab)i);
+            if (GUILayout.Button(tabNames[i], tabStyle, GUILayout.Width(buttonWidth)))
+            {
+                currentTab = (Tab)i;
+                // Reset any result views when switching tabs
+                showResults = false;
+                GUI.FocusControl(null);
+            }
+            GUI.enabled = true;
         }
-        
-        GUILayout.FlexibleSpace();
         EditorGUILayout.EndHorizontal();
     }
 
@@ -272,6 +280,49 @@ public class ShaderTool : EditorWindow
         EditorGUI.EndDisabledGroup();
         
         EditorGUILayout.EndVertical();
+    }
+
+    /// <summary>
+    /// Draws the Error Shaders section which lists all materials using the error shader
+    /// ("Hidden/InternalErrorShader") and allows for replacing them.
+    /// </summary>
+    private void DrawErrorShadersSection()
+    {
+        EditorGUILayout.BeginVertical(boxStyle);
+        GUILayout.Label("Error Shaders", sectionHeaderStyle);
+        GUILayout.Space(10);
+
+        EditorGUILayout.HelpBox("This will list all materials with shader errors (Hidden/InternalErrorShader). You can select a replacement shader to fix them.", MessageType.Info);
+        GUILayout.Space(10);
+
+        // Replacement field for error shaders – using the same replaceToShader field
+        replaceToShader = EditorGUILayout.ObjectField("Replace With:", replaceToShader, typeof(Shader), false) as Shader;
+
+        GUILayout.Space(10);
+        EditorGUILayout.BeginHorizontal();
+        if (GUILayout.Button("Find Error Shaders", customButtonStyle))
+        {
+            FindErrorShaders();
+        }
+        EditorGUI.BeginDisabledGroup(replaceToShader == null);
+        if (GUILayout.Button("Replace Error Shaders", customButtonStyle))
+        {
+            if (EditorUtility.DisplayDialog("Confirm Replacement",
+                $"Are you sure you want to replace all error shaders (Hidden/InternalErrorShader) with '{replaceToShader.name}'?\n\nThis operation can be undone with Edit > Undo.",
+                "Yes, Replace", "Cancel"))
+            {
+                FindAndReplaceErrorShaders("Hidden/InternalErrorShader", replaceToShader.name);
+            }
+        }
+        EditorGUI.EndDisabledGroup();
+        EditorGUILayout.EndHorizontal();
+        EditorGUILayout.EndVertical();
+
+        GUILayout.Space(10);
+        if (showResults)
+        {
+            DrawResultsSection();
+        }
     }
 
     /// <summary>
@@ -532,6 +583,65 @@ public class ShaderTool : EditorWindow
         }
         AssetDatabase.SaveAssets();
         Debug.Log($"Replaced {replacedCount} materials using shader '{oldShaderName}' with '{newShaderName}'.");
+    }
+
+    /// <summary>
+    /// Finds all materials using the error shader "Hidden/InternalErrorShader".
+    /// </summary>
+    private void FindErrorShaders()
+    {
+        foundMaterials.Clear();
+        string[] allMaterialGuids = AssetDatabase.FindAssets("t:Material");
+        foreach (string guid in allMaterialGuids)
+        {
+            string assetPath = AssetDatabase.GUIDToAssetPath(guid);
+            if (!assetPath.StartsWith("Assets/"))
+                continue;
+            Material mat = AssetDatabase.LoadAssetAtPath<Material>(assetPath);
+            if (mat == null || mat.shader == null || string.IsNullOrEmpty(mat.shader.name))
+                continue;
+            if (mat.shader.name.Equals("Hidden/InternalErrorShader", StringComparison.OrdinalIgnoreCase))
+            {
+                foundMaterials.Add(mat);
+            }
+        }
+        foundMaterials.Sort((a, b) => a.name.CompareTo(b.name));
+        showResults = true;
+        currentPage = 0;
+        UpdatePaginationAndPreviews();
+    }
+
+    /// <summary>
+    /// Finds and replaces all materials that use the error shader with a new shader.
+    /// </summary>
+    private void FindAndReplaceErrorShaders(string oldShaderName, string newShaderName)
+    {
+        int replacedCount = 0;
+        Shader newShader = Shader.Find(newShaderName);
+        if (newShader == null)
+        {
+            Debug.LogError("New shader not found: " + newShaderName);
+            return;
+        }
+        string[] allMaterialGuids = AssetDatabase.FindAssets("t:Material");
+        foreach (string guid in allMaterialGuids)
+        {
+            string assetPath = AssetDatabase.GUIDToAssetPath(guid);
+            if (!assetPath.StartsWith("Assets/"))
+                continue;
+            Material mat = AssetDatabase.LoadAssetAtPath<Material>(assetPath);
+            if (mat == null || mat.shader == null)
+                continue;
+            if (mat.shader.name.Equals(oldShaderName, StringComparison.OrdinalIgnoreCase))
+            {
+                Undo.RecordObject(mat, "Replace Error Shader");
+                mat.shader = newShader;
+                EditorUtility.SetDirty(mat);
+                replacedCount++;
+            }
+        }
+        AssetDatabase.SaveAssets();
+        Debug.Log($"Replaced {replacedCount} error materials using shader '{oldShaderName}' with '{newShaderName}'.");
     }
 
     /// <summary>
